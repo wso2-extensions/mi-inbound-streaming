@@ -20,7 +20,7 @@
 
     <groupId>org.wso2.integration.inbound</groupId>
     <artifactId>mi-inbound-streaming</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>0.0.9-SNAPSHOT</version>
     <name>WSO2 Carbon - Streaming File Inbound Endpoint</name>
     <description>File inbound endpoint that streams large CSV, JSON, JSONL and text files into
         WSO2 Micro Integrator 4.1.0 record by record or chunk by chunk, with checkpointing and
