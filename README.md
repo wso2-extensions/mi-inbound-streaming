@@ -285,7 +285,8 @@ A failing callback is logged, but it never changes the file's outcome.
 | `transport.vfs.ActionAfterFailure` | `DELETE` (tooling pre-fills `MOVE`) | `MOVE`, `DELETE` or `NONE` when a file fails as a whole. |
 | `transport.vfs.MoveAfterFailure` | — | Destination folder for failed files. |
 | `transport.vfs.SubFolderTimestampFormat` | none | Date pattern for a dated sub-folder under the destination. |
-| `transport.vfs.CreateFolder` | `false` | Create missing destination folders. |
+| `transport.vfs.MoveTimestampFormat` | none | A `SimpleDateFormat` pattern (e.g. `yyyyMMdd-HHmmss`). The moved file is named `<formatted time>_<file name>` in the move folder, so repeated runs don't overwrite each other. |
+| `transport.vfs.CreateFolder` | `false` | Create missing destination folders. Can also be given as a query parameter on the destination URI. |
 | `transport.vfs.UpdateLastModified` | `false` (tooling pre-fills `true`) | `true` sets a moved file's last-modified time to the time of the move; `false` keeps the original. |
 | `transport.vfs.MoveAfterFailedMove` | none | Where to put a file whose move itself failed. |
 | `transport.vfs.FailedRecordsFileName` | `vfs-move-failed-records.properties` | Record of files whose move failed, retried on later polls. |

@@ -30,6 +30,7 @@ import org.apache.commons.vfs2.FileSystemManager;
 import org.apache.commons.vfs2.FileSystemOptions;
 
 import java.text.DateFormat;
+import java.util.Date;
 import java.util.Map;
 import java.util.Properties;
 
@@ -81,26 +82,42 @@ public class MoveAction implements Action {
             }
 
             FileObject moveToDirectory = fsManager.resolveFile(targetLocation, destinationFSO);
-            FileObject dest = moveToDirectory.resolveFile(fileObject.getName().getBaseName());
-            if (query != null && !StringUtils.isEmpty(query.get(org.wso2.carbon.inbound.streaming.VFSConstants.FORCE_CREATE_FOLDER))) {
-                String isForceCreated = query.get(VFSConstants.FORCE_CREATE_FOLDER);
-                if (Boolean.parseBoolean(isForceCreated)) {
-                    dest.createFile();
-                }
+            // Settle the final name before anything touches the destination, so the folder
+            // creation and the last-modified flag below apply to the file actually written.
+            FileObject dest = moveToDirectory.resolveFile(destinationFileName(fileObject));
+            // transport.vfs.CreateFolder, as an inbound parameter or a query parameter on the URI.
+            boolean forceCreate = vfsConfig.isForceCreateFolder();
+            if (query != null && !StringUtils.isEmpty(query.get(VFSConstants.FORCE_CREATE_FOLDER))) {
+                forceCreate = Boolean.parseBoolean(query.get(VFSConstants.FORCE_CREATE_FOLDER));
+            }
+            if (forceCreate) {
+                dest.createFile();
             }
 
             dest.setUpdateLastModified(vfsConfig.isUpdateLastModified());
-
-            if (vfsConfig.getMoveTimestampFormat() != null) {
-                DateFormat moveTimestampFormat = vfsConfig.getMoveTimestampFormat();
-                dest = fileObject.resolveFile(moveTimestampFormat + "_" + fileObject.getName().getBaseName());
-            }
 
             fileObject.moveTo(dest);
             log.info("File moved");
 
         } else {
             log.info("Target location not provided. Hence not moving the file");
+        }
+    }
+
+    /**
+     * The name the file is moved under: its own name, prefixed with the current time when
+     * {@code transport.vfs.MoveTimestampFormat} is set (e.g. {@code 20261027-1015_orders.csv}), so
+     * repeated runs do not overwrite each other in the move folder.
+     */
+    String destinationFileName(FileObject fileObject) {
+        String baseName = fileObject.getName().getBaseName();
+        DateFormat moveTimestampFormat = vfsConfig.getMoveTimestampFormat();
+        if (moveTimestampFormat == null) {
+            return baseName;
+        }
+        // The format instance is shared through VFSConfig, and DateFormat is not thread-safe.
+        synchronized (moveTimestampFormat) {
+            return moveTimestampFormat.format(new Date()) + "_" + baseName;
         }
     }
 }
