@@ -129,21 +129,63 @@ public class JSONLStreamingProcessor extends ChunkedDataProcessor {
     }
 
     /**
-     * Reads the next non-blank line, or null at end of stream. Throws a non-recoverable
-     * StreamingException on an underlying I/O failure.
+     * Reads the next non-blank line, or null at end of stream. An underlying I/O failure is
+     * thrown as an IOException; the iterators hold it as a pending error (see {@link LineCursor}).
      */
-    private static String nextNonBlankLine(BufferedReader reader, long recordCount) {
-        try {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (!line.trim().isEmpty()) {
-                    return line;
-                }
+    private static String nextNonBlankLine(BufferedReader reader) throws IOException {
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (!line.trim().isEmpty()) {
+                return line;
             }
-            return null;
-        } catch (IOException e) {
-            throw new StreamingException(
-                    "Failed to read JSONL stream after line " + recordCount, e, recordCount, false);
+        }
+        return null;
+    }
+
+    /**
+     * One line of read-ahead over the reader. A read failure is not thrown when it happens: it is
+     * held and thrown by {@link #take()} once the line already read has been taken, so that line
+     * (or a chunk being filled) is still returned first.
+     */
+    private static final class LineCursor {
+
+        private final BufferedReader reader;
+        private String nextLine;
+        private StreamingException pendingError;
+
+        LineCursor(BufferedReader reader) {
+            this.reader = reader;
+        }
+
+        /** Read ahead one non-blank line; {@code linesTaken} numbers a failure. */
+        void advance(long linesTaken) {
+            try {
+                nextLine = nextNonBlankLine(reader);
+            } catch (IOException e) {
+                nextLine = null;
+                pendingError = new StreamingException(
+                        "Failed to read JSONL stream after line " + linesTaken, e, linesTaken + 1,
+                        false, StreamingException.Kind.IO);
+            }
+        }
+
+        /** A line is ready to be taken (as opposed to only a pending error). */
+        boolean hasLine() {
+            return nextLine != null;
+        }
+
+        boolean hasNext() {
+            return nextLine != null || pendingError != null;
+        }
+
+        /** The line read ahead, or the pending error if there is no line. Does not advance. */
+        String take() {
+            if (nextLine == null && pendingError != null) {
+                StreamingException error = pendingError;
+                pendingError = null;
+                throw error;
+            }
+            return nextLine;
         }
     }
 
@@ -152,25 +194,24 @@ public class JSONLStreamingProcessor extends ChunkedDataProcessor {
      */
     private final class JsonlRowIterator implements Iterator<StreamRecord> {
 
-        private final BufferedReader reader;
+        private final LineCursor cursor;
         private final Charset charset;
         private long recordCount = 0;
-        private String nextLine;
 
         JsonlRowIterator(BufferedReader reader, Charset charset, long startFromRecord) {
-            this.reader = reader;
+            this.cursor = new LineCursor(reader);
             this.charset = charset;
-            this.nextLine = nextNonBlankLine(reader, recordCount);
+            cursor.advance(recordCount);
             // Resume: discard the leading records already processed before the checkpoint.
-            while (recordCount < startFromRecord && nextLine != null) {
+            while (recordCount < startFromRecord && cursor.hasLine()) {
                 recordCount++;
-                this.nextLine = nextNonBlankLine(reader, recordCount);
+                cursor.advance(recordCount);
             }
         }
 
         @Override
         public boolean hasNext() {
-            return nextLine != null;
+            return cursor.hasNext();
         }
 
         @Override
@@ -178,9 +219,9 @@ public class JSONLStreamingProcessor extends ChunkedDataProcessor {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more JSONL lines to iterate");
             }
+            String line = cursor.take();
             recordCount++;
-            String line = nextLine;
-            nextLine = nextNonBlankLine(reader, recordCount);
+            cursor.advance(recordCount);
             return toRecord(line, recordCount, charset);
         }
 
@@ -196,30 +237,29 @@ public class JSONLStreamingProcessor extends ChunkedDataProcessor {
      */
     private final class JsonlChunkIterator implements Iterator<StreamChunk> {
 
-        private final BufferedReader reader;
+        private final LineCursor cursor;
         private final Charset charset;
         private final int chunkSize;
         private int chunkNumber = 0;
         private long recordCount = 0;
-        private String nextLine;
 
         JsonlChunkIterator(BufferedReader reader, Charset charset, int chunkSize,
                 long startFromRecord, long startFromChunk) {
             this.chunkNumber = (int) startFromChunk;
-            this.reader = reader;
+            this.cursor = new LineCursor(reader);
             this.charset = charset;
             this.chunkSize = chunkSize;
-            this.nextLine = nextNonBlankLine(reader, recordCount);
+            cursor.advance(recordCount);
             // Resume: discard the leading records already processed before the checkpoint.
-            while (recordCount < startFromRecord && nextLine != null) {
+            while (recordCount < startFromRecord && cursor.hasLine()) {
                 recordCount++;
-                this.nextLine = nextNonBlankLine(reader, recordCount);
+                cursor.advance(recordCount);
             }
         }
 
         @Override
         public boolean hasNext() {
-            return nextLine != null;
+            return cursor.hasNext();
         }
 
         @Override
@@ -227,6 +267,7 @@ public class JSONLStreamingProcessor extends ChunkedDataProcessor {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more JSONL lines to iterate");
             }
+            cursor.take();  // throws a pending read error when no line is left
             chunkNumber++;
             StreamChunk chunk = new StreamChunk(chunkSize);
             chunk.setChunkNumber(chunkNumber);
@@ -239,10 +280,11 @@ public class JSONLStreamingProcessor extends ChunkedDataProcessor {
             }
 
             int linesInChunk = 0;
-            while (linesInChunk < chunkSize && hasNext()) {
+            // Stop at a pending read error: this chunk is returned, the next call throws it.
+            while (linesInChunk < chunkSize && cursor.hasLine()) {
+                String line = cursor.take();
                 recordCount++;
-                String line = nextLine;
-                nextLine = nextNonBlankLine(reader, recordCount);
+                cursor.advance(recordCount);
                 linesInChunk++;
 
                 StreamRecord record = toRecord(line, recordCount, charset);

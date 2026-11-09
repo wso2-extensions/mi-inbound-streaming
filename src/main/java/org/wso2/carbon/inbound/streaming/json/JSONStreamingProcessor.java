@@ -226,6 +226,7 @@ public class JSONStreamingProcessor extends ChunkedDataProcessor {
         private final Charset charset;
         private long recordCount = 0;
         private JsonNode nextNode;
+        private StreamingException pendingError;
 
         JsonRowIterator(JsonParser parser, Charset charset, CompiledPath path,
                 long startFromRecord) {
@@ -239,6 +240,11 @@ public class JSONStreamingProcessor extends ChunkedDataProcessor {
             }
         }
 
+        /**
+         * Read ahead one match. A parse failure is not thrown here: it is held in
+         * {@code pendingError} and thrown by the next {@code next()} call, so the match already
+         * read (or a chunk being filled) is still returned first.
+         */
         private void advance() {
             try {
                 nextNode = cursor.nextMatch();
@@ -247,21 +253,30 @@ public class JSONStreamingProcessor extends ChunkedDataProcessor {
                 // the stream is meaningless, so surface a non-recoverable failure and let the caller
                 // apply the configured action-after-failure (move / delete) to the whole file.
                 nextNode = null;
-                throw new StreamingException(
-                        "Failed to parse JSON stream at match " + recordCount, e, recordCount, false,
-                        StreamingException.Kind.PARSE);
+                pendingError = new StreamingException(
+                        "Failed to parse JSON stream at match " + (recordCount + 1), e,
+                        recordCount + 1, false, StreamingException.Kind.PARSE);
             }
         }
 
         @Override
         public boolean hasNext() {
-            return nextNode != null;
+            return nextNode != null || pendingError != null;
+        }
+
+        private void throwPendingError() {
+            StreamingException error = pendingError;
+            pendingError = null;
+            throw error;
         }
 
         @Override
         public StreamRecord next() {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more JSON matches to iterate");
+            }
+            if (nextNode == null) {
+                throwPendingError();
             }
             recordCount++;
             JsonNode node = nextNode;
@@ -298,6 +313,7 @@ public class JSONStreamingProcessor extends ChunkedDataProcessor {
         private int chunkNumber = 0;
         private long recordCount = 0;
         private JsonNode nextNode;
+        private StreamingException pendingError;
 
         JsonChunkIterator(JsonParser parser, Charset charset, int chunkSize, CompiledPath path,
                 long startFromRecord, long startFromChunk) {
@@ -313,6 +329,11 @@ public class JSONStreamingProcessor extends ChunkedDataProcessor {
             }
         }
 
+        /**
+         * Read ahead one match. A parse failure is not thrown here: it is held in
+         * {@code pendingError} and thrown by the next {@code next()} call, so the match already
+         * read (or a chunk being filled) is still returned first.
+         */
         private void advance() {
             try {
                 nextNode = cursor.nextMatch();
@@ -321,21 +342,30 @@ public class JSONStreamingProcessor extends ChunkedDataProcessor {
                 // the stream is meaningless, so surface a non-recoverable failure and let the caller
                 // apply the configured action-after-failure (move / delete) to the whole file.
                 nextNode = null;
-                throw new StreamingException(
-                        "Failed to parse JSON stream at match " + recordCount, e, recordCount, false,
-                        StreamingException.Kind.PARSE);
+                pendingError = new StreamingException(
+                        "Failed to parse JSON stream at match " + (recordCount + 1), e,
+                        recordCount + 1, false, StreamingException.Kind.PARSE);
             }
         }
 
         @Override
         public boolean hasNext() {
-            return nextNode != null;
+            return nextNode != null || pendingError != null;
+        }
+
+        private void throwPendingError() {
+            StreamingException error = pendingError;
+            pendingError = null;
+            throw error;
         }
 
         @Override
         public StreamChunk next() {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more JSON matches to iterate");
+            }
+            if (nextNode == null) {
+                throwPendingError();
             }
 
             chunkNumber++;
@@ -350,7 +380,8 @@ public class JSONStreamingProcessor extends ChunkedDataProcessor {
             }
 
             int matchesInChunk = 0;
-            while (matchesInChunk < chunkSize && hasNext()) {
+            // Stop at a pending parse error: this chunk is returned, the next call throws it.
+            while (matchesInChunk < chunkSize && nextNode != null) {
                 recordCount++;
                 JsonNode node = nextNode;
                 advance();

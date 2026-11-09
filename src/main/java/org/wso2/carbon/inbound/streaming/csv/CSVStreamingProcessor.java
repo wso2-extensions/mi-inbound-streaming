@@ -180,6 +180,7 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
         private int chunkNumber = 0;
         private boolean eof = false;
         private CSVRecord nextRecord;
+        private StreamingException pendingError;
         private final Charset charset;
 
         ChunkIterator(BufferedReader reader, Charset charset, long startFromRecord,
@@ -208,7 +209,7 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
                 advanceToNextRecord();
                 // Resume: the header (row 0) is already parsed above; discard the leading data
                 // rows already processed before the checkpoint.
-                while (recordCount < startFromRecord && hasNext()) {
+                while (recordCount < startFromRecord && hasRecord()) {
                     recordCount++;
                     advanceToNextRecord();
                 }
@@ -219,6 +220,11 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
             }
         }
 
+        /**
+         * Read ahead one record. A parse failure is not thrown here: it is held in
+         * {@code pendingError} and thrown by the next {@code next()} call, so the record already
+         * read (or a chunk being filled) is still returned first.
+         */
         private void advanceToNextRecord() {
             try {
                 if (csvIterator.hasNext()) {
@@ -230,20 +236,36 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
             } catch (UncheckedIOException ex) {
                 long errorRecordNumber = recordCount + 1;
                 if (hasHeader) errorRecordNumber++;
-                throw new StreamingException("Error reading CSV record", ex.getCause(),
+                nextRecord = null;
+                eof = true;
+                pendingError = new StreamingException("Error reading CSV record", ex.getCause(),
                     errorRecordNumber, false, StreamingException.Kind.PARSE);
             }
         }
 
+        /** A record is ready to be returned (as opposed to only a pending error). */
+        private boolean hasRecord() {
+            return !eof && nextRecord != null;
+        }
+
         @Override
         public boolean hasNext() {
-            return !eof && nextRecord != null;
+            return hasRecord() || pendingError != null;
+        }
+
+        private void throwPendingError() {
+            StreamingException error = pendingError;
+            pendingError = null;
+            throw error;
         }
 
         @Override
         public StreamChunk next() {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more records to iterate");
+            }
+            if (!hasRecord()) {
+                throwPendingError();
             }
             return getNextBatchChunk();
         }
@@ -277,7 +299,8 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
             }
 
             int rowsInChunk = 0;
-            while (rowsInChunk < chunkSize && hasNext()) {
+            // Stop at a pending parse error: this chunk is returned, the next call throws it.
+            while (rowsInChunk < chunkSize && hasRecord()) {
                 recordCount++;
                 CSVRecord record = nextRecord;
                 advanceToNextRecord();
@@ -344,6 +367,7 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
         private long recordCount = 0;
         private boolean eof = false;
         private CSVRecord nextRecord;
+        private StreamingException pendingError;
 
         RowIterator(BufferedReader reader, Charset charset, long startFromRecord)
             throws StreamingException {
@@ -366,7 +390,7 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
                 advanceToNextRecord();
                 // Resume: the header (row 0) is already parsed above; discard the leading data
                 // rows already processed before the checkpoint.
-                while (recordCount < startFromRecord && hasNext()) {
+                while (recordCount < startFromRecord && hasRecord()) {
                     recordCount++;
                     advanceToNextRecord();
                 }
@@ -377,6 +401,11 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
             }
         }
 
+        /**
+         * Read ahead one record. A parse failure is not thrown here: it is held in
+         * {@code pendingError} and thrown by the next {@code next()} call, so the record already
+         * read (or a chunk being filled) is still returned first.
+         */
         private void advanceToNextRecord() {
             try {
                 if (csvIterator.hasNext()) {
@@ -388,20 +417,36 @@ public class CSVStreamingProcessor extends ChunkedDataProcessor {
             } catch (UncheckedIOException ex) {
                 long errorRecordNumber = recordCount + 1;
                 if (hasHeader) errorRecordNumber++;
-                throw new StreamingException("Error reading CSV record", ex.getCause(),
+                nextRecord = null;
+                eof = true;
+                pendingError = new StreamingException("Error reading CSV record", ex.getCause(),
                     errorRecordNumber, false, StreamingException.Kind.PARSE);
             }
         }
 
+        /** A record is ready to be returned (as opposed to only a pending error). */
+        private boolean hasRecord() {
+            return !eof && nextRecord != null;
+        }
+
         @Override
         public boolean hasNext() {
-            return !eof && nextRecord != null;
+            return hasRecord() || pendingError != null;
+        }
+
+        private void throwPendingError() {
+            StreamingException error = pendingError;
+            pendingError = null;
+            throw error;
         }
 
         @Override
         public StreamRecord next() {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more records to iterate");
+            }
+            if (!hasRecord()) {
+                throwPendingError();
             }
 
             recordCount++;

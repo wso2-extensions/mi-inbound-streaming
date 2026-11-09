@@ -93,18 +93,25 @@ public class TextStreamingProcessor extends ChunkedDataProcessor {
         private long recordCount = 0;
         private String nextLine;
         private boolean eof = false;
+        private StreamingException pendingError;
 
         TextRowIterator(BufferedReader reader, Charset charset, long startFromRecord) {
             this.reader = reader;
             this.charset = charset;
             advance();
             // Resume: discard the leading records already processed before the checkpoint.
-            while (recordCount < startFromRecord && hasNext()) {
+            while (recordCount < startFromRecord && hasLine()) {
                 recordCount++;
                 advance();
             }
         }
 
+        /**
+         * Read ahead one line. A read failure is not thrown here: it is held in
+         * {@code pendingError} and thrown by the next {@code next()} call, so the line already
+         * read (or a chunk being filled) is still returned first. It must not be treated as end
+         * of file, or the file would be post-processed as fully consumed.
+         */
         private void advance() {
             try {
                 nextLine = reader.readLine();
@@ -114,19 +121,35 @@ public class TextStreamingProcessor extends ChunkedDataProcessor {
             } catch (IOException e) {
                 nextLine = null;
                 eof = true;
-                log.warn("Error reading text stream at line " + recordCount, e);
+                pendingError = new StreamingException(
+                    "Failed to read text stream at line " + (recordCount + 1), e, recordCount + 1,
+                    false, StreamingException.Kind.IO);
             }
+        }
+
+        /** A line is ready to be returned (as opposed to only a pending error). */
+        private boolean hasLine() {
+            return !eof && nextLine != null;
         }
 
         @Override
         public boolean hasNext() {
-            return !eof && nextLine != null;
+            return hasLine() || pendingError != null;
+        }
+
+        private void throwPendingError() {
+            StreamingException error = pendingError;
+            pendingError = null;
+            throw error;
         }
 
         @Override
         public StreamRecord next() {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more lines to iterate");
+            }
+            if (!hasLine()) {
+                throwPendingError();
             }
             recordCount++;
             String line = nextLine;
@@ -162,6 +185,7 @@ public class TextStreamingProcessor extends ChunkedDataProcessor {
         private long recordCount = 0;
         private String nextLine;
         private boolean eof = false;
+        private StreamingException pendingError;
 
         TextChunkIterator(BufferedReader reader, Charset charset, int chunkSize,
                 long startFromRecord, long startFromChunk) {
@@ -171,12 +195,18 @@ public class TextStreamingProcessor extends ChunkedDataProcessor {
             this.chunkSize = chunkSize;
             advance();
             // Resume: discard the leading records already processed before the checkpoint.
-            while (recordCount < startFromRecord && hasNext()) {
+            while (recordCount < startFromRecord && hasLine()) {
                 recordCount++;
                 advance();
             }
         }
 
+        /**
+         * Read ahead one line. A read failure is not thrown here: it is held in
+         * {@code pendingError} and thrown by the next {@code next()} call, so the line already
+         * read (or a chunk being filled) is still returned first. It must not be treated as end
+         * of file, or the file would be post-processed as fully consumed.
+         */
         private void advance() {
             try {
                 nextLine = reader.readLine();
@@ -186,19 +216,35 @@ public class TextStreamingProcessor extends ChunkedDataProcessor {
             } catch (IOException e) {
                 nextLine = null;
                 eof = true;
-                log.warn("Error reading text stream at line " + recordCount, e);
+                pendingError = new StreamingException(
+                    "Failed to read text stream at line " + (recordCount + 1), e, recordCount + 1,
+                    false, StreamingException.Kind.IO);
             }
+        }
+
+        /** A line is ready to be returned (as opposed to only a pending error). */
+        private boolean hasLine() {
+            return !eof && nextLine != null;
         }
 
         @Override
         public boolean hasNext() {
-            return !eof && nextLine != null;
+            return hasLine() || pendingError != null;
+        }
+
+        private void throwPendingError() {
+            StreamingException error = pendingError;
+            pendingError = null;
+            throw error;
         }
 
         @Override
         public StreamChunk next() {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more lines to iterate");
+            }
+            if (!hasLine()) {
+                throwPendingError();
             }
 
             chunkNumber++;
@@ -213,7 +259,8 @@ public class TextStreamingProcessor extends ChunkedDataProcessor {
             }
 
             int linesInChunk = 0;
-            while (linesInChunk < chunkSize && hasNext()) {
+            // Stop at a pending read error: this chunk is returned, the next call throws it.
+            while (linesInChunk < chunkSize && hasLine()) {
                 recordCount++;
                 String line = nextLine;
                 advance();
