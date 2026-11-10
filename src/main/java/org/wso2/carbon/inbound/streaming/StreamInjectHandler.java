@@ -238,6 +238,9 @@ public class StreamInjectHandler extends AbstractInjectHandler {
             closeReplyWriter(file);
         }
 
+        if (progress.isInterrupted()) {
+            cancelled = true;      // the last unit(s) were cut off by the shutdown: not a finished file
+        }
         if (cancelled) {
             return finishOnShutdown(file, checkpoints, progress.lastConsumed, progress.lastChunk,
                 failed);
@@ -483,6 +486,9 @@ public class StreamInjectHandler extends AbstractInjectHandler {
         long recordNumber = record.getRecordNumber();
         if (!record.isValid()) {
             window.submit(null, (result, error) -> {
+                if (progress.isInterrupted()) {
+                    return;     // behind a unit the shutdown cut off: left for the resume
+                }
                 failed.parseFailure(record);
                 progress.consumed(recordNumber, null);
             });
@@ -494,8 +500,19 @@ public class StreamInjectHandler extends AbstractInjectHandler {
             () -> mediate(name, contentType, body, payloadText(record.getJSONPayload()),
                 StreamPosition.ofRecord(record)),
             (result, error) -> {
+                if (skippedAfterInterrupt(progress, error)) {
+                    return;
+                }
                 if (committed(result, error, what)) {
                     failed.recordProcessed(1);
+                } else if (vfsProperties.isCanceled()) {
+                    // The mediation failed while the server was shutting down (an undeploy or a stop took the
+                    // sequences away from under it): the record is not bad. Leave it unconsumed, so the checkpoint
+                    // stays in front of it and the file resumes from it, instead of dropping it.
+                    log.warn("Record " + recordNumber + " was interrupted by the shutdown; it will be processed "
+                        + "again when the file resumes.");
+                    progress.interrupted();
+                    return;
                 } else {
                     // Mediation failed: apply the mediation-error action to this record's content
                     // (raw content, or its payload in property-output mode).
@@ -534,6 +551,9 @@ public class StreamInjectHandler extends AbstractInjectHandler {
         // Nothing to mediate once the invalid records are set aside; still commit in order.
         if (validRecords.isEmpty()) {
             window.submit(null, (result, error) -> {
+                if (progress.isInterrupted()) {
+                    return;     // behind a unit the shutdown cut off: left for the resume
+                }
                 invalidRecords.forEach(failed::parseFailure);
                 progress.consumed(lastRecord, chunkNumber);
             });
@@ -548,8 +568,20 @@ public class StreamInjectHandler extends AbstractInjectHandler {
             () -> mediate(name, contentType, body, chunk.getPayloadText(),
                 StreamPosition.ofChunk(chunk, validRecords.size())),
             (result, error) -> {
+                if (skippedAfterInterrupt(progress, error)) {
+                    return;
+                }
+                boolean ok = committed(result, error, what);
+                if (!ok && vfsProperties.isCanceled()) {
+                    // Shutdown took the sequences away from under the chunk: not a bad chunk. Leave it (and its parse
+                    // failures) unconsumed so the file resumes from it.
+                    log.warn("Chunk " + chunkNumber + " was interrupted by the shutdown; it will be processed "
+                        + "again when the file resumes.");
+                    progress.interrupted();
+                    return;
+                }
                 invalidRecords.forEach(failed::parseFailure);
-                if (committed(result, error, what)) {
+                if (ok) {
                     failed.recordProcessed(validRecords.size());
                 } else {
                     // The chunk failed mediation as a unit; hand the whole chunk (in the shape it
@@ -676,6 +708,21 @@ public class StreamInjectHandler extends AbstractInjectHandler {
         return true;
     }
 
+    /**
+     * True when an earlier unit was cut off by the shutdown. The resume point stays in front of
+     * that unit, so every unit after it is read and mediated again on resume: committing it now
+     * (counters, sidecars, reply file) would record it twice.
+     */
+    private boolean skippedAfterInterrupt(Progress progress, Throwable error) {
+        if (!progress.isInterrupted()) {
+            return false;
+        }
+        if (error instanceof Error) {
+            throw (Error) error;    // as in committed(): never swallow e.g. an out of memory
+        }
+        return true;
+    }
+
     /** The outcome of mediating one unit, carried from its worker to its commit. */
     private static final class Mediated {
 
@@ -702,6 +749,8 @@ public class StreamInjectHandler extends AbstractInjectHandler {
         // Absolute chunk number of the last chunk delivered, so a resume keeps counting.
         private long lastChunk;
         private int unitsSinceFlush;
+        // Set when a unit failed only because the server was shutting down. The resume point then stays in front of it.
+        private boolean interrupted;
 
         private Progress(StreamingCheckpointManager checkpoints, FailedRecordCollector failed,
                          long startFromRecord, long startFromChunk) {
@@ -711,6 +760,15 @@ public class StreamInjectHandler extends AbstractInjectHandler {
             this.lastChunk = startFromChunk;
         }
 
+        /** A unit failed because of the shutdown: it is not consumed, and no later unit may be either. */
+        void interrupted() {
+            interrupted = true;
+        }
+
+        boolean isInterrupted() {
+            return interrupted;
+        }
+
         /**
          * One unit committed. Commits are contiguous, so every record up to {@code lastRecord} is
          * done and it is a safe resume point.
@@ -718,6 +776,9 @@ public class StreamInjectHandler extends AbstractInjectHandler {
          * @param chunkNumber the unit's chunk number in CHUNK mode, null in RECORD mode
          */
         void consumed(long lastRecord, Long chunkNumber) {
+            if (interrupted) {
+                return;
+            }
             lastConsumed = lastRecord;
             if (chunkNumber != null) {
                 lastChunk = chunkNumber;
