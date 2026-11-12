@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Verify every commons-vfs member this inbound calls exists in the commons-vfs the SERVER runs.
 #
-# We compile against 2.2.0-wso2v13.20 (provided) but MI 4.1.0 ships
-# commons-vfs2_2.2.0.wso2v13_18.jar, and that is the one the OSGi bundle resolves against. Anything
-# present in .20 but not _18 compiles cleanly and then throws NoSuchMethodError on every call -
-# which is exactly how SftpFileSystemConfigBuilder.setConnectTimeout slipped in.
+# We compile against the public 2.2.0-wso2v30 (provided), but the OSGi bundle resolves against the
+# jar the server ships, commons-vfs2_2.2.0.wso2v13_18.jar, or _20 at a current update level.
+# Anything present in the compile jar but not in the server's compiles cleanly and then throws
+# NoSuchMethodError on every call. This is how SftpFileSystemConfigBuilder.setConnectTimeout
+# slipped in.
 #
 #   usage: tools/check-runtime-api.sh <MI_HOME>
 set -u

@@ -45,23 +45,31 @@
             <version>${carbon.mediation.version}</version>
         </dependency>
 
-        <!-- MI 4.1.0 ships commons-vfs 2.2.0-wso2v13.20 (bundled as
-             wso2/components/plugins/commons-vfs2_2.2.0.wso2v13_20.jar). Two things differ from the
-             2.10.x fork used by MI 4.5+:
-               1. it is NOT package-relocated - its classes live in org.apache.commons.vfs2, not
-                  org.wso2.org.apache.commons.vfs2 (only the Maven groupId carries the wso2 prefix);
+        <!-- The server provides commons-vfs. MI 4.1.0 ships it as the bundle
+             wso2/components/plugins/commons-vfs2_2.2.0.wso2v13_<n>.jar, so these are provided and
+             only used to compile. Two things differ from the 2.10.x fork used by MI 4.5+:
+               1. it is NOT package relocated. Its classes live in org.apache.commons.vfs2, not
+                  org.wso2.org.apache.commons.vfs2. Only the Maven groupId carries the wso2 prefix.
                2. the smb2 provider, including Smb2FileSystemConfigBuilder that Utils configures,
-                  lives in commons-vfs2-sandbox on this line, and only from the .20 update onward -
-                  plain 2.2.0-wso2v13 does not carry it. -->
+                  lives in commons-vfs2-sandbox on this line. The server has it from the .20 update.
+             We compile against the public 2.2.0-wso2v30. The update builds the server runs
+             (2.2.0-wso2v13.18, 2.2.0-wso2v13.20) are not on the public Nexus. The last public build
+             with Java 8 class files, 2.2.0-wso2v26, has no SftpFileSystemConfigBuilder
+             .setConnectTimeout. For every class this inbound uses, 2.2.0-wso2v30 has the same API as
+             2.2.0-wso2v13.20, plus four FTPS key store type setters that we do not call. Its class
+             files are Java 21, which only affects the build JDK (see maven-compiler-plugin).
+             tools/check-runtime-api.sh checks our calls against the server's jar. -->
         <dependency>
             <groupId>org.wso2.org.apache.commons</groupId>
             <artifactId>commons-vfs2</artifactId>
             <version>${commons.vfs2.version}</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.wso2.org.apache.commons</groupId>
             <artifactId>commons-vfs2-sandbox</artifactId>
             <version>${commons.vfs2.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
@@ -151,13 +159,16 @@
                 </configuration>
             </plugin>
 
+            <!-- Build on JDK 21, because the commons-vfs jar we compile against has Java 21 class
+                 files. release 8 makes javac check every JDK call against the Java 8 API and write
+                 Java 8 class files, so the jar runs on a JDK 8 server. source and target 8 alone
+                 would not stop calls that only exist in later JDKs. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>2.0</version>
+                <version>3.11.0</version>
                 <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
+                    <release>8</release>
                 </configuration>
             </plugin>
             <plugin>
@@ -236,15 +247,15 @@
     </repositories>
 
     <properties>
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Pinned to what WSO2 MI 4.1.0 actually ships. The inbound-endpoint version is the
-             update build (4.1.0.142) rather than base 4.1.0: GenericPollingConsumer.resume(),
-             which VFSConsumer overrides, only exists from the update stream. -->
-        <carbon.mediation.version>4.1.0.142</carbon.mediation.version>
+        <!-- Pinned to what WSO2 MI 4.1.0 ships, except inbound-endpoint and commons-vfs. The server
+             provides those two and we only compile against them. The update builds the server
+             runs are not on the public Nexus. inbound-endpoint is the public 4.1.0, which has no
+             GenericPollingConsumer.resume(). That method comes in a later update build, so
+             VFSConsumer.resume() has no @Override. See the commons-vfs dependency for its version. -->
+        <carbon.mediation.version>4.1.0</carbon.mediation.version>
         <synapse.version>2.1.7-wso2v271</synapse.version>
-        <commons.vfs2.version>2.2.0-wso2v13.20</commons.vfs2.version>
+        <commons.vfs2.version>2.2.0-wso2v30</commons.vfs2.version>
         <com.hierynomus.smbj.version>0.11.3.wso2v1</com.hierynomus.smbj.version>
         <com.hierynomus.asn1.version>0.6.0.wso2v1</com.hierynomus.asn1.version>
         <jackson.version>2.21.5</jackson.version>

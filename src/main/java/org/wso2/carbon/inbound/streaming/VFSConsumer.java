@@ -720,7 +720,9 @@ public class VFSConsumer extends GenericPollingConsumer {
         this.close();
     }
 
-    @Override
+    // No @Override. We compile against the public 4.1.0 API, and GenericPollingConsumer declares
+    // resume() only from a later 4.1.0 update. On a server at that level this method still
+    // overrides it, because the JVM matches a method by name and signature, not by the annotation.
     public void resume() {
         try {
             ((StandardFileSystemManager) fsManager).init();

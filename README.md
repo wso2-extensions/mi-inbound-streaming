@@ -4,7 +4,7 @@ The streaming file inbound endpoint lets **WSO2 Micro Integrator 4.1.0** process
 
 On top of streaming, it adds the things a long-running file job needs: resume after a restart, per-record error handling that does not fail the whole file, parallel mediation, an output (reply) file, and callbacks when a file is finished.
 
-> **Supported runtime: WSO2 Micro Integrator 4.1.0.** Built and tested against MI 4.1.0 (Synapse `2.1.7-wso2v271`, commons-vfs `2.2.0-wso2v13.20`). It runs on the JDK that MI 4.1.0 runs on, including JDK 8.
+> **Supported runtime: WSO2 Micro Integrator 4.1.0.** Tested against MI 4.1.0 (Synapse `2.1.7-wso2v271`, commons-vfs `2.2.0-wso2v13.20`). It runs on the JDK that MI 4.1.0 runs on, including JDK 8.
 
 ## Contents
 
@@ -429,7 +429,7 @@ More complete configurations, and a sample for a failure sequence, are in [`docs
 
 ## Building from source
 
-Requirements: **JDK 8** (or newer, compiling to Java 8) and **Maven 3.6+**.
+Requirements: **JDK 21** and **Maven 3.6+**. The jar is compiled for Java 8 and runs on a JDK 8 server.
 
 ```bash
 mvn clean install
@@ -439,10 +439,7 @@ This produces:
 - `target/mi-inbound-streaming-<version>.jar`, the inbound endpoint;
 - `target/mi-inbound-streaming-<version>.zip`, the connector-store bundle (jar, `uischema.json`, `connector.xml`, `descriptor.yml`).
 
-> **Dependency access:** the build compiles against MI 4.1.0 *update-level* artifacts, which are not on the public WSO2 Nexus. You need access to the WSO2 support Maven repository (`https://support-maven.wso2.org/nexus/content/repositories/updates-2.0/`) in your `~/.m2/settings.xml`. The artifacts are:
-> - `org.wso2.ei:org.wso2.micro.integrator.inbound.endpoint:4.1.0.142`
-> - `org.wso2.org.apache.commons:commons-vfs2:2.2.0-wso2v13.20`
-> - `org.wso2.org.apache.commons:commons-vfs2-sandbox:2.2.0-wso2v13.20`
+> **Dependencies:** all come from the public WSO2 Nexus. The build compiles against the public `org.wso2.ei:org.wso2.micro.integrator.inbound.endpoint:4.1.0` and `org.wso2.org.apache.commons:commons-vfs2(-sandbox):2.2.0-wso2v30`. At runtime the inbound uses the versions the server ships.
 
 This inbound is a port of the upstream [`mi-inbound-file`](https://github.com/wso2-extensions/mi-inbound-file) streaming work to MI 4.1.0.
 

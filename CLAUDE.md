@@ -16,7 +16,8 @@ one message. It is a port of `mi-inbound-file` (branch `streaming`), whose packa
 - **No message variables:** output goes to a property (`StreamingOutputProperty`, alias
   `StreamingOutputVariable`) as `JsonElement.toString()`, never `getAsString()`.
 - **Smaller `GenericPollingConsumer`:** no cron constructor (use `interval`), no `pause()`
-  override, and `resume()` only exists from `inbound.endpoint:4.1.0.142`, hence that pin.
+  override, and `resume()` only exists from `inbound.endpoint:4.1.0.142`. We compile against the
+  public `4.1.0`, so `VFSConsumer.resume()` has no `@Override`.
 - **Gson:** the inbound-endpoint bundle embeds a pre-2.8.6 Gson that can win over 2.9.0, so use
   `new JsonParser().parse(...)`, not `JsonParser.parseString(...)`.
 - **No `org.jetbrains.annotations`** on the runtime classpath.
@@ -34,22 +35,23 @@ mvn test                             # unit tests (JUnit 4)
 tools/check-runtime-api.sh <MI_HOME> # verify every commons-vfs call exists in the server's jar
 ```
 
-The build needs the WSO2 support Maven repository (`updates-2.0`) in `~/.m2/settings.xml`:
-`inbound.endpoint:4.1.0.142` and `commons-vfs2(-sandbox):2.2.0-wso2v13.20` are MI 4.1.0
-update-level artifacts that are not on the public Nexus. The public `4.1.0` / `2.2.0-wso2v13`
-lack APIs the code uses (see above). Build and test on JDK 8, the runtime's level.
+All dependencies come from the public WSO2 Nexus. inbound-endpoint and commons-vfs are only used
+to compile. The server provides both. We compile against the public `inbound.endpoint:4.1.0` and
+`commons-vfs2(-sandbox):2.2.0-wso2v30`, because the update builds the server runs (`4.1.0.142`,
+`2.2.0-wso2v13.20`) are not on the public Nexus. `2.2.0-wso2v30` has Java 21 class files, so build
+on JDK 21. The compiler uses `release 8`, so the jar is Java 8 and runs on a JDK 8 server. Unit
+tests run on the build JDK, so test on a JDK 8 server before a release.
 
 Release: `.github/workflows/publish-release.yml` (manual dispatch) releases to Nexus, creates the
 GitHub release with the zip, and opens a PR regenerating `.connector-store/meta.json` from
-`uischema.json`. It needs the `WSO2_SUPPORT_MAVEN_USERNAME/PASSWORD` secrets for the dependencies
-above. `README.md` is the user-facing documentation; keep its parameter tables in step with
+`uischema.json`. `README.md` is the user-facing documentation; keep its parameter tables in step with
 `uischema.json` and the code defaults.
 
 To deploy, copy the jar and `commons-csv-1.14.1.jar` into `<MI_HOME>/lib` and **restart** MI. Jars
 in `lib` are not hot-deployed, and replacing one under a running server is unsafe. Inbound and
 sequence XML files *are* hot-deployed. Note that `mvn test` does not rebuild the jar.
 
-- **Java level:** the code targets Java 8.
+- **Java level:** the code targets Java 8 (`release 8`) and is built on JDK 21.
 - **MI runtime:** the server runs on whatever JDK it is started with. A JDK 8 server uses Nashorn
   for `<script language="js">`, and performance differs noticeably from newer JDKs.
 
