@@ -576,7 +576,7 @@ public class Utils {
      * {@code Class.getMethod} resolves every public signature on
      * {@code SftpFileSystemConfigBuilder}, one of which references {@code com.jcraft.jsch.UserInfo},
      * so a lookup fails wherever jsch is not loadable and would take the whole of {@code Utils}
-     * down with it. The direct call compiles against the pinned {@code 2.2.0-wso2v13.20} and
+     * down with it. The direct call compiles against the public {@code 2.2.0-wso2v30} and
      * raises {@code NoSuchMethodError} only on a server still shipping the older {@code _18} jar,
      * which is precisely the case being handled.
      */

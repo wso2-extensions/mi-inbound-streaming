@@ -24,13 +24,13 @@ jobs:
           token: ${{ secrets.WSO2_INTEGRATION_BOT_TOKEN }}
           fetch-depth: 0
 
-      # MI 4.1.0 runs on JDK 8, so build on it: compiling with -source/-target 8 on a newer JDK
-      # would not stop the code from calling APIs that only exist in later JDKs.
-      - name: Set up JDK 8
+      # The commons-vfs jar we compile against has Java 21 class files, so build on JDK 21.
+      # maven-compiler-plugin uses release 8, so the jar still runs on a JDK 8 server.
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '8'
+          java-version: '21'
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -43,10 +43,6 @@ jobs:
           VERSION_TAG="v$VERSION"
           echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
 
-      # The build compiles against two MI 4.1.0 update-level artifacts that are not on the public
-      # WSO2 Nexus: org.wso2.ei:org.wso2.micro.integrator.inbound.endpoint:4.1.0.142 and
-      # org.wso2.org.apache.commons:commons-vfs2(-sandbox):2.2.0-wso2v13.20. They are resolved from
-      # the WSO2 support (updates) repository, which needs the WSO2_SUPPORT_MAVEN_* secrets.
       - name: Configure Maven settings file
         run: |
           mkdir -p ~/.m2
@@ -57,28 +53,7 @@ jobs:
                       <username>${{ secrets.NEXUS_USERNAME }}</username>
                       <password>${{ secrets.NEXUS_PASSWORD }}</password>
                     </server>
-                    <server>
-                      <id>wso2-support-updates</id>
-                      <username>${{ secrets.WSO2_SUPPORT_MAVEN_USERNAME }}</username>
-                      <password>${{ secrets.WSO2_SUPPORT_MAVEN_PASSWORD }}</password>
-                    </server>
                   </servers>
-                  <profiles>
-                    <profile>
-                      <id>wso2-support-updates</id>
-                      <repositories>
-                        <repository>
-                          <id>wso2-support-updates</id>
-                          <url>https://support-maven.wso2.org/nexus/content/repositories/updates-2.0/</url>
-                          <releases><enabled>true</enabled></releases>
-                          <snapshots><enabled>false</enabled></snapshots>
-                        </repository>
-                      </repositories>
-                    </profile>
-                  </profiles>
-                  <activeProfiles>
-                    <activeProfile>wso2-support-updates</activeProfile>
-                  </activeProfiles>
                 </settings>" > ~/.m2/settings.xml
 
       - name: Configure git credentials
